@@ -1,4 +1,4 @@
-using Zygote, LinearAlgebra, Statistics, JSON3, Dates
+using Zygote, LinearAlgebra, Statistics, JSON3, Dates, Plots
 
 # --- Helper: Stroboscopic Metadata Tracking ---
 struct SatMeta
@@ -42,7 +42,9 @@ function run_discovery(config_path, times, data)
    
     best_p = p
     min_val_mse = Inf
-    best_correlation = 0.0
+    best_correlation_val = 0.0
+    best_correlation_train = 0.0
+    best_preds_full = zeros(length(times))
 
     for epoch in 1:150
         # Zygote AD Heavy Lifting
@@ -82,20 +84,40 @@ function run_discovery(config_path, times, data)
         # Cross-Validation
         v_preds = [lte_forward(p, t, ω_basis) for t in times[last(train_idx)+1:end]]
         v_mse = mean((v_preds .- data[last(train_idx)+1:end]).^2)
-        correlation = cor(v_preds, data[last(train_idx)+1:end])
+        correlation_val = cor(v_preds, data[last(train_idx)+1:end])
         # Calculate the Pearson correlation for the validation set (the final objective measure)
-        println("Correlation (R): $(round(correlation, digits=4))")
+        println("Correlation (R): $(round(correlation_val, digits=4))")
 
         if v_mse < min_val_mse
             min_val_mse = v_mse
             best_p = p
-            best_correlation = correlation
+            best_correlation_val = correlation_val
+            
+            # Also capture the training correlation for the best model
+            t_preds = [lte_forward(p, t, ω_basis) for t in times[train_idx]]
+            best_correlation_train = cor(t_preds, data[train_idx])
+            
+            # Capture full predictions for plotting
+            best_preds_full = [lte_forward(p, t, ω_basis) for t in times]
         elseif epoch > 50 && (v_mse > min_val_mse * 1.05)
             break # Early stopping on overfitting
         end
     end
 
-    println("Discovery Complete. Best Validation MSE: $(round(min_val_mse, digits=6)) | Corresponding Correlation (R): $(round(best_correlation, digits=4))")
+    println("Discovery Complete. Best Validation MSE: $(round(min_val_mse, digits=6)) | Corresponding Validation Correlation (R): $(round(best_correlation_val, digits=4))")
+    
+    # Generate the time-series plot
+    cv_start_time = times[last(train_idx)+1]
+    cv_end_time = times[end]
+    
+    p_plot = plot(times, data, label="Target Data", color=:black, linewidth=1.5, title="LTE Discovery: Target vs Prediction\nTrain R: $(round(best_correlation_train, digits=3)) | CV R: $(round(best_correlation_val, digits=3))", xlabel="Time", ylabel="Value", legend=:outertopright)
+    plot!(p_plot, times, best_preds_full, label="Best Prediction", color=:blue, linewidth=1.5)
+    
+    # Shade the CV region
+    vspan!(p_plot, [cv_start_time, cv_end_time], color=:gray, alpha=0.3, label="CV Interval")
+    
+    savefig(p_plot, replace(config_path, ".json" => "_discovery_plot.png"))
+
     save_roundtrip(config_path, best_p, metadata, min_val_mse)
 end
 
