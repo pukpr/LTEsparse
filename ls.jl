@@ -42,7 +42,7 @@ function run_discovery(config_path, times, data)
    
     best_p = p
     min_val_mse = Inf
-    # correlation = 0.0
+    best_correlation = 0.0
 
     for epoch in 1:150
         # Zygote AD Heavy Lifting
@@ -89,11 +89,13 @@ function run_discovery(config_path, times, data)
         if v_mse < min_val_mse
             min_val_mse = v_mse
             best_p = p
+            best_correlation = correlation
         elseif epoch > 50 && (v_mse > min_val_mse * 1.05)
             break # Early stopping on overfitting
         end
     end
 
+    println("Discovery Complete. Best Validation MSE: $(round(min_val_mse, digits=6)) | Corresponding Correlation (R): $(round(best_correlation, digits=4))")
     save_roundtrip(config_path, best_p, metadata, min_val_mse)
 end
 
