@@ -53,12 +53,27 @@ function run_discovery(config_path, times, data)
             return mse + 0.02*sum(abs.(p_opt.c)) + 0.005*sum(p_opt.A.^2)
         end, p)
 
+        # Gradient Clipping to prevent explosion
+        clip_max = 5.0
+        clip_norm(g) = begin
+            n = norm(g)
+            if isnan(n) || isinf(n)
+                return zero.(g)
+            else
+                return n > clip_max ? g .* (clip_max / n) : g
+            end
+        end
+        gc = clip_norm(grads[1].c)
+        gβ = clip_norm(grads[1].β)
+        gA = clip_norm(grads[1].A)
+        gθ = clip_norm(grads[1].θ)
+
         # Update Step (Adaptive Gradient Scaling)
-        η = 0.01 / (norm(grads[1].c) + 1e-6)
-        p = (c = p.c .- η .* grads[1].c,
-             β = p.β .- η .* grads[1].β,
-             A = p.A .- (η*0.1) .* grads[1].A, # Slower updates for severe A
-             θ = p.θ .- η .* grads[1].θ)
+        η = 0.01 / (norm(gc) + 1e-6)
+        p = (c = p.c .- η .* gc,
+             β = p.β .- η .* gβ,
+             A = p.A .- (η*0.1) .* gA, # Slower updates for severe A
+             θ = p.θ .- η .* gθ)
 
         # SINDy-style Pruning: Threshold based on relative power
         threshold = 0.005 * maximum(abs.(p.c))
