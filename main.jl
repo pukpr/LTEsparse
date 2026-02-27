@@ -13,17 +13,37 @@ if !isfile(config_path) || !isfile(data_path)
     exit(1)
 end
 
-# Check if file has a header by test-reading
-test_df = CSV.read(data_path, DataFrame; limit=1)
+# Check if file has a header by test-reading (handles whitespace/comma delimiting and strips whitespace)
+test_df = CSV.read(data_path, DataFrame; limit=1, delim=' ', ignorerepeated=true, stripwhitespace=true)
 if "year_fraction" in names(test_df) && "nino34_normalized" in names(test_df)
-    df = CSV.read(data_path, DataFrame)
+    df = CSV.read(data_path, DataFrame; delim=' ', ignorerepeated=true, stripwhitespace=true)
     times = Float64.(df.year_fraction)
     data  = Float64.(df.nino34_normalized)
 else
-    # Assume 1st column is year, 2nd column is amplitude (headerless)
-    df = CSV.read(data_path, DataFrame; header=false)
-    times = Float64.(df[:, 1])
-    data  = Float64.(df[:, 2])
+    # Fallback for comma if first check failed due to comma instead of space
+    test_df_comma = CSV.read(data_path, DataFrame; limit=1, stripwhitespace=true)
+    if "year_fraction" in names(test_df_comma) && "nino34_normalized" in names(test_df_comma)
+        df = CSV.read(data_path, DataFrame; stripwhitespace=true)
+        times = Float64.(df.year_fraction)
+        data  = Float64.(df.nino34_normalized)
+    else
+        # Assume 1st column is year, 2nd column is amplitude (headerless)
+        # We'll use CSV with auto-detection but force ignorerepeated in case of arbitrary whitespace
+        # We default to space, ignorerepeated, stripwhitespace
+        try
+            df = CSV.read(data_path, DataFrame; header=false, delim=' ', ignorerepeated=true, stripwhitespace=true)
+            if size(df, 2) < 2
+                throw(ArgumentError("Less than 2 columns found with space delimiter."))
+            end
+            times = Float64.(df[:, 1])
+            data  = Float64.(df[:, 2])
+        catch
+            # Fallback to comma separation
+            df = CSV.read(data_path, DataFrame; header=false, stripwhitespace=true)
+            times = Float64.(df[:, 1])
+            data  = Float64.(df[:, 2])
+        end
+    end
 end
 
 println("Using config: ", config_path, " and data: ", data_path)
