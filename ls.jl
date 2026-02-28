@@ -71,7 +71,7 @@ function run_discovery(config_path, times, data)
         gβ = clip_norm(grads[1].β)
         gA = clip_norm(grads[1].A)
         gθ = clip_norm(grads[1].θ)
-        gbias = clip_norm(grads[1].bias)
+        gbias = grads[1].bias # Do not clip bias gradient, it needs freedom to move
 
         # Update Step (Adaptive Gradient Scaling)
         η = 0.01 / (norm(gc) + 1e-6)
@@ -79,7 +79,7 @@ function run_discovery(config_path, times, data)
              β = p.β .- η .* gβ,
              A = p.A .- (η*0.1) .* gA, # Slower updates for severe A
              θ = p.θ .- η .* gθ,
-             bias = p.bias - (η*0.5) * gbias) # Bias learns moderately fast
+             bias = p.bias - (η*100.0) * gbias) # Bias needs a much faster learning rate to anchor properly
 
         # SINDy-style Pruning: Threshold based on relative power
         threshold = 0.005 * maximum(abs.(p.c))
