@@ -23,7 +23,9 @@ function load_and_flatten(path)
         end
     end
    
-    p = (c=c_init, β=Float64.(raw.beta_weights), A=Float64.(raw.wavenumber_gains), θ=Float64.(raw.mod_phases))
+    # Load bias if it exists, otherwise default to 0.0
+    bias = haskey(raw, :bias) ? Float64(raw.bias) : 0.0
+    p = (c=c_init, β=Float64.(raw.beta_weights), A=Float64.(raw.wavenumber_gains), θ=Float64.(raw.mod_phases), bias=bias)
     return p, ω_basis, metadata, raw
 end
 
@@ -31,8 +33,8 @@ end
 function lte_forward(p, t, ω_basis)
     # The 'Wiggly' Latent Signal
     z = sum(real(p.c[j] * exp(im * 2π * ω_basis[j] * t)) for j in 1:length(ω_basis))
-    # The Exact Trig Folding (Severe Modulation)
-    return sum(p.β[k] * sin(p.A[k] * z + p.θ[k]) for k in 1:length(p.β))
+    # The Exact Trig Folding (Severe Modulation) + Explicit Bias Offset
+    return sum(p.β[k] * sin(p.A[k] * z + p.θ[k]) for k in 1:length(p.β)) + p.bias
 end
 
 # --- 3. The Discovery Loop (Backprop + SINDy) ---
@@ -46,7 +48,7 @@ function run_discovery(config_path, times, data)
     best_correlation_train = 0.0
     best_preds_full = zeros(length(times))
 
-    for epoch in 1:150
+    for epoch in 1:5000
         # Zygote AD Heavy Lifting
         val, grads = withgradient(p_opt -> begin
             preds = [lte_forward(p_opt, t, ω_basis) for t in times[train_idx]]
@@ -69,13 +71,15 @@ function run_discovery(config_path, times, data)
         gβ = clip_norm(grads[1].β)
         gA = clip_norm(grads[1].A)
         gθ = clip_norm(grads[1].θ)
+        gbias = clip_norm(grads[1].bias)
 
         # Update Step (Adaptive Gradient Scaling)
         η = 0.01 / (norm(gc) + 1e-6)
         p = (c = p.c .- η .* gc,
              β = p.β .- η .* gβ,
              A = p.A .- (η*0.1) .* gA, # Slower updates for severe A
-             θ = p.θ .- η .* gθ)
+             θ = p.θ .- η .* gθ,
+             bias = p.bias - (η*0.5) * gbias) # Bias learns moderately fast
 
         # SINDy-style Pruning: Threshold based on relative power
         threshold = 0.005 * maximum(abs.(p.c))
@@ -86,7 +90,7 @@ function run_discovery(config_path, times, data)
         v_mse = mean((v_preds .- data[last(train_idx)+1:end]).^2)
         correlation_val = cor(v_preds, data[last(train_idx)+1:end])
         # Calculate the Pearson correlation for the validation set (the final objective measure)
-        println("Correlation (R): $(round(correlation_val, digits=4))")
+        println("$(epoch) Correlation (R): $(round(correlation_val, digits=4))")
 
         if v_mse < min_val_mse
             min_val_mse = v_mse
@@ -99,7 +103,7 @@ function run_discovery(config_path, times, data)
             
             # Capture full predictions for plotting
             best_preds_full = [lte_forward(p, t, ω_basis) for t in times]
-        elseif epoch > 50 && (v_mse > min_val_mse * 1.05)
+        elseif epoch > 1500 && (v_mse > min_val_mse * 1.2)  # 1.05
             break # Early stopping on overfitting
         end
     end
@@ -138,7 +142,7 @@ function save_roundtrip(path, p, metadata, mse)
 
     final = Dict(
         "tidal_constituents" => [Dict("name"=>k, "satellites"=>v) for (k,v) in constituents],
-        "beta_weights" => p.β, "wavenumber_gains" => p.A, "mod_phases" => p.θ,
+        "beta_weights" => p.β, "wavenumber_gains" => p.A, "mod_phases" => p.θ, "bias" => p.bias,
         "metrics" => Dict("val_mse" => mse, "timestamp" => ts)
     )
    
