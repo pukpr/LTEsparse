@@ -88,7 +88,7 @@ function run_discovery(config_path, times, data)
         # Cross-Validation
         v_preds = [lte_forward(p, t, ω_basis) for t in times[last(train_idx)+1:end]]
         v_mse = mean((v_preds .- data[last(train_idx)+1:end]).^2)
-        correlation_val = cor(v_preds, data[last(train_idx)+1:end])
+        correlation_val = std(v_preds) > 0 ? cor(v_preds, data[last(train_idx)+1:end]) : 0.0
         # Calculate the Pearson correlation for the validation set (the final objective measure)
         println("$(epoch) Correlation (R): $(round(correlation_val, digits=4))")
 
@@ -99,7 +99,7 @@ function run_discovery(config_path, times, data)
             
             # Also capture the training correlation for the best model
             t_preds = [lte_forward(p, t, ω_basis) for t in times[train_idx]]
-            best_correlation_train = cor(t_preds, data[train_idx])
+            best_correlation_train = std(t_preds) > 0 ? cor(t_preds, data[train_idx]) : 0.0
             
             # Capture full predictions for plotting
             best_preds_full = [lte_forward(p, t, ω_basis) for t in times]
